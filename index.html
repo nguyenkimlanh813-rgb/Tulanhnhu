@@ -1,0 +1,367 @@
+
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Người Vận Chuyển 3D</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;overflow:hidden;font-family:Arial;background:#87ceeb;touch-action:none}
+canvas{display:block}
+#hud{position:fixed;top:8px;left:8px;right:8px;z-index:5;
+display:flex;justify-content:space-between;gap:6px;pointer-events:none}
+.panel{background:#14202ddd;color:white;padding:10px;border-radius:12px;
+font-size:13px;line-height:1.6;max-width:72%}
+#money{color:#ffe66d;font-weight:bold}
+#mission{position:fixed;top:103px;left:8px;z-index:5;
+background:#fffE;color:#17202a;padding:10px;border-radius:10px;
+font-size:13px;max-width:245px;line-height:1.5}
+button{border:0;border-radius:12px;padding:12px 14px;font-weight:bold;
+background:#ffcf40;color:#202020;font-size:13px;touch-action:none}
+#jobs{position:fixed;inset:0;z-index:10;background:#14202dee;
+color:white;display:flex;align-items:center;justify-content:center;padding:20px}
+#jobbox{width:min(390px,100%);background:#26374a;padding:22px;border-radius:20px}
+#jobbox h1{font-size:26px;margin:0 0 8px;color:#ffda59}
+.job{background:#354b62;padding:13px;border-radius:12px;margin-top:12px}
+.job button{width:100%;margin-top:8px}
+#controls{position:fixed;bottom:16px;left:12px;right:12px;
+z-index:6;display:flex;align-items:flex-end;justify-content:space-between}
+#steer{display:grid;grid-template-columns:58px 58px;gap:8px}
+#steer button{height:58px;font-size:23px;background:#152638dd;color:white}
+#pedals{display:flex;gap:8px;align-items:flex-end}
+#pedals button{height:58px;min-width:62px}
+#gas{background:#28c76f}
+#brake{background:#ff6565}
+#action{position:fixed;bottom:94px;right:15px;z-index:7;
+background:#ffda59;padding:14px 20px}
+#hint{position:fixed;bottom:154px;left:50%;transform:translateX(-50%);
+z-index:5;background:#17202dcc;color:white;padding:8px 12px;
+border-radius:10px;font-size:12px;white-space:nowrap}
+#maplabel{font-size:11px;color:#d7e9ff}
+</style>
+</head>
+<body>
+
+<div id="hud">
+ <div class="panel">
+  <b>🚚 NGƯỜI VẬN CHUYỂN</b><br>
+  💰 Tiền: <span id="money">500</span> đ<br>
+  📦 Đơn hoàn thành: <span id="done">0</span><br>
+  🚐 Xe: <span id="vehicle">Xe giao hàng</span>
+ </div>
+ <div class="panel" style="text-align:right">
+  <span id="speed">0</span> km/h<br>
+  <span id="maplabel">THÀNH PHỐ 3D</span>
+ </div>
+</div>
+
+<div id="mission">📋 Hãy nhận đơn hàng để bắt đầu.</div>
+<div id="hint">Dùng nút điều khiển để lái xe</div>
+
+<div id="controls">
+ <div id="steer">
+  <button id="left">◀</button>
+  <button id="right">▶</button>
+ </div>
+ <div id="pedals">
+  <button id="brake">PHANH</button>
+  <button id="gas">GA ▲</button>
+ </div>
+</div>
+
+<button id="action">📦 NHẬN ĐƠN</button>
+
+<div id="jobs">
+ <div id="jobbox">
+  <h1>🚚 Người Vận Chuyển</h1>
+  <p>Trở thành tài xế giao hàng trong thành phố 3D!</p>
+  <div class="job">
+   <b>📦 Giao hàng tiêu chuẩn</b>
+   <p>Đến kho lấy hàng, giao tận nhà khách.</p>
+   <p>💵 Tiền công: 150–300 đ</p>
+   <button id="start">BẮT ĐẦU LÀM VIỆC</button>
+  </div>
+  <div class="job">
+   <b>🕹️ Hướng dẫn</b>
+   <p>◀ ▶ để rẽ, GA để chạy, PHANH để dừng.</p>
+   <p>Đến đúng điểm màu xanh để lấy hàng, sau đó đến điểm giao màu vàng.</p>
+  </div>
+ </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x87ceeb);
+scene.fog=new THREE.Fog(0x87ceeb,100,280);
+
+const camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,600);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.7));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xffffff,0x68764d,2));
+const sun=new THREE.DirectionalLight(0xffffff,2.2);
+sun.position.set(-50,100,40);
+sun.castShadow=true;
+scene.add(sun);
+
+const mat=(color)=>new THREE.MeshStandardMaterial({color,roughness:.85});
+const grass=mat(0x6bb85c),road=mat(0x41464d),line=mat(0xffffff);
+const concrete=mat(0xbfc5c9),yellow=mat(0xffcf37);
+
+function cube(w,h,d,m,x,y,z,parent=scene){
+ const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);
+ o.position.set(x,y,z);o.castShadow=true;o.receiveShadow=true;
+ parent.add(o);return o;
+}
+
+// Mặt đất
+cube(600,1,600,grass,0,-.7,0);
+
+// Đường phố dạng ô bàn cờ
+for(let i=-240;i<=240;i+=60){
+ cube(18,.08,520,road,i,.0,0);
+ cube(520,.08,18,road,0,.01,i);
+ for(let k=-240;k<=240;k+=12){
+  cube(.25,.025,5,line,i,.06,k);
+  cube(5,.025,.25,line,k,.06,i);
+ }
+}
+
+// Vỉa hè và thành phố
+const colors=[0xe8b99b,0xd8ddea,0xf0d27d,0xc4d8d2,
+              0xd8b7da,0xf1f1f1,0xb6c8e2];
+const buildings=[];
+for(let x=-210;x<=210;x+=30){
+ for(let z=-210;z<=210;z+=30){
+  if(Math.abs(x%60)<15||Math.abs(z%60)<15)continue;
+  const w=12+Math.random()*5,d=12+Math.random()*5;
+  const h=8+Math.random()*30;
+  const b=cube(w,h,d,mat(colors[Math.floor(Math.random()*colors.length)]),
+               x,h/2,z);
+  buildings.push(b);
+  // Cửa sổ
+  for(let yy=4;yy<h-2;yy+=4){
+   for(let xx=-w/2+2;xx<w/2-1;xx+=3){
+    cube(.9,1.4,.12,mat(0x8bd4f3),x+xx,yy,z+d/2+.08);
+   }
+  }
+  cube(w+.5,.5,d+.5,mat(0x858c92),x,h+.25,z);
+ }
+}
+
+// Cây xanh
+function tree(x,z){
+ const trunk=cube(1,4,1,mat(0x795132),x,2,z);
+ const crown=cube(4,5,4,mat(0x287b3c),x,5,z);
+}
+for(let x=-220;x<=220;x+=30){
+ for(let z=-220;z<=220;z+=30){
+  if(Math.abs(x%60)>16&&Math.abs(z%60)>16)tree(x,z);
+ }
+}
+
+// Tạo xe giao hàng
+const car=new THREE.Group();
+scene.add(car);
+const white=mat(0xf4f5f7),black=mat(0x20252b);
+cube(2.8,1.1,4,white,0,1.15,0,car);
+cube(2.65,1.15,1.8,mat(0x2186c4),0,2.1,-.65,car);
+cube(2.65,.95,2,white,0,2.15,1.1,car);
+cube(2.7,.2,3.8,mat(0x2d3339),0,.55,0,car);
+for(const x of [-1.35,1.35]){
+ for(const z of [-1.25,1.25]){
+  const wheel=new THREE.Mesh(new THREE.CylinderGeometry(.48,.48,.3,16),
+                             black);
+  wheel.rotation.z=Math.PI/2;
+  wheel.position.set(x,.55,z);car.add(wheel);
+ }
+}
+cube(.45,.18,.1,mat(0xfff1a8),-.9,1.35,-2.02,car);
+cube(.45,.18,.1,mat(0xfff1a8),.9,1.35,-2.02,car);
+car.position.set(0,0,10);
+
+// Các điểm nhiệm vụ
+function marker(color){
+ const g=new THREE.Group();
+ const ring=new THREE.Mesh(new THREE.TorusGeometry(3,.25,8,32),
+                            mat(color));
+ ring.rotation.x=Math.PI/2;ring.position.y=.3;g.add(ring);
+ const beam=new THREE.Mesh(new THREE.CylinderGeometry(.15,.15,5,10),
+                           mat(color));
+ beam.position.y=2.8;g.add(beam);
+ scene.add(g);return g;
+}
+const warehouse=marker(0x25e69a);
+warehouse.position.set(0,0,-35);
+
+const destination=marker(0xffce35);
+destination.visible=false;
+
+let money=500,done=0,hasJob=false,hasPackage=false;
+let reward=200,target=null;
+let speed=0,steering=0;
+const keys={left:false,right:false,gas:false,brake:false};
+let mode="idle";
+
+function chooseDestination(){
+ const places=[
+  {x:60,z:10},{x:-60,z:10},{x:10,z:60},{x:10,z:-60},
+  {x:120,z:60},{x:-120,z:-60},{x:60,z:-120},{x:-60,z:120}
+ ];
+ return places[Math.floor(Math.random()*places.length)];
+}
+function newJob(){
+ target=chooseDestination();
+ destination.position.set(target.x,0,target.z);
+ destination.visible=true;
+ reward=150+Math.floor(Math.random()*151);
+ hasJob=true;hasPackage=false;mode="pickup";
+ updateUI();
+}
+function updateUI(){
+ document.getElementById("money").textContent=money.toLocaleString("vi-VN");
+ document.getElementById("done").textContent=done;
+ document.getElementById("speed").textContent=Math.round(Math.abs(speed)*2.2);
+ const m=document.getElementById("mission");
+ const a=document.getElementById("action");
+ if(!hasJob){
+  m.innerHTML="📋 Chưa có đơn hàng.<br>Nhận đơn để bắt đầu công việc.";
+  a.textContent="📦 NHẬN ĐƠN";
+ }else if(!hasPackage){
+  m.innerHTML="📦 Đơn hàng mới!<br>Đến <b>kho màu xanh</b> để lấy kiện hàng.";
+  a.textContent="📦 LẤY HÀNG";
+ }else{
+  m.innerHTML="🚚 Đang giao hàng!<br>Đến điểm <b>màu vàng</b>.<br>Tiền công: "+reward+" đ";
+  a.textContent="✅ GIAO HÀNG";
+ }
+}
+function distance(a,b){
+ return Math.hypot(a.x-b.x,a.z-b.z);
+}
+document.getElementById("action").onclick=()=>{
+ if(!hasJob){newJob();return}
+ if(mode==="pickup"&&distance(car.position,warehouse.position)<10){
+  hasPackage=true;mode="deliver";
+  warehouse.visible=false;
+  updateUI();
+ }else if(mode==="deliver"&&distance(car.position,destination.position)<10){
+  money+=reward;done++;
+  hasJob=false;hasPackage=false;mode="idle";
+  destination.visible=false;warehouse.visible=true;
+  updateUI();
+ }else{
+  document.getElementById("hint").textContent=
+    "Bạn chưa đến đúng điểm! Hãy lái xe đến điểm đánh dấu.";
+ }
+};
+document.getElementById("start").onclick=()=>{
+ document.getElementById("jobs").style.display="none";
+ newJob();
+};
+function bindHold(id,key){
+ const el=document.getElementById(id);
+ el.addEventListener("pointerdown",e=>{
+  e.preventDefault();keys[key]=true;
+  try{el.setPointerCapture(e.pointerId)}catch(_){}
+ });
+ const release=e=>{keys[key]=false};
+ el.addEventListener("pointerup",release);
+ el.addEventListener("pointercancel",release);
+ el.addEventListener("lostpointercapture",release);
+}
+bindHold("left","left");
+bindHold("right","right");
+bindHold("gas","gas");
+bindHold("brake","brake");
+
+addEventListener("keydown",e=>{
+ if(["ArrowLeft","a","A"].includes(e.key))keys.left=true;
+ if(["ArrowRight","d","D"].includes(e.key))keys.right=true;
+ if(["ArrowUp","w","W"].includes(e.key))keys.gas=true;
+ if(["ArrowDown","s","S"].includes(e.key))keys.brake=true;
+});
+addEventListener("keyup",e=>{
+ if(["ArrowLeft","a","A"].includes(e.key))keys.left=false;
+ if(["ArrowRight","d","D"].includes(e.key))keys.right=false;
+ if(["ArrowUp","w","W"].includes(e.key))keys.gas=false;
+ if(["ArrowDown","s","S"].includes(e.key))keys.brake=false;
+});
+
+const clock=new THREE.Clock();
+const forward=new THREE.Vector3();
+const camPos=new THREE.Vector3();
+function animate(){
+ requestAnimationFrame(animate);
+ const dt=Math.min(clock.getDelta(),.04);
+
+ if(keys.gas)speed=Math.min(speed+15*dt,24);
+ else if(keys.brake)speed=Math.max(speed-28*dt,-5);
+ else speed*=Math.pow(.96,dt*60);
+
+ if(keys.left)steering=1;
+ else if(keys.right)steering=-1;
+ else steering=0;
+
+ if(Math.abs(speed)>.2){
+  car.rotation.y+=steering*dt*1.5*Math.sign(speed);
+ }
+ forward.set(-Math.sin(car.rotation.y),0,-Math.cos(car.rotation.y));
+ car.position.addScaledVector(forward,speed*dt);
+
+ // Giới hạn thành phố
+ car.position.x=THREE.MathUtils.clamp(car.position.x,-255,255);
+ car.position.z=THREE.MathUtils.clamp(car.position.z,-255,255);
+
+  // CAMERA NHÌN TỪ PHÍA SAU VÀ TRÊN CAO
+const behind = new THREE.Vector3(
+  Math.sin(car.rotation.y) * 13,
+  10,
+  Math.cos(car.rotation.y) * 13
+);
+
+camPos.copy(car.position).add(behind);
+camera.position.lerp(camPos, 0.12);
+
+camera.lookAt(
+  car.position.x,
+  car.position.y + 1,
+  car.position.z
+); 
+ 
+
+ // Điểm giao nổi bật
+ warehouse.rotation.y+=dt;
+ destination.rotation.y-=dt;
+
+ // Nhắc khi đến nơi
+ if(hasJob){
+  const point=hasPackage?destination:warehouse;
+  if(distance(car.position,point.position)<10){
+   document.getElementById("hint").textContent=
+    hasPackage?"Đã đến nhà khách! Bấm GIAO HÀNG.":"Đã đến kho! Bấm LẤY HÀNG.";
+  }else{
+   document.getElementById("hint").textContent=
+    hasPackage?"Hãy đến điểm màu vàng để giao hàng.":"Hãy đến kho màu xanh để lấy hàng.";
+  }
+ }
+ document.getElementById("speed").textContent=
+   Math.round(Math.abs(speed)*2.2);
+ renderer.render(scene,camera);
+}
+updateUI();
+animate();
+
+addEventListener("resize",()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
